@@ -11,4 +11,8 @@ ImputationSlides.tex - Beamer raw code for slides
 ImputationIntro.qmd - R quarto file for demonstration 
 
 ## Reproducibility and why we care
-Reproducibility2026.pptx - slides for importance of reproducibility
+Reproducibility2026.pptx - slides for importance of reproducibility. References below.
+
+- A Beginner's Guide to Conducting Reproducible Research (https://doi.org/10.1002/bes2.1801)
+- Setting up your data science project (https://vdsbook.com/03-code_reproducibility)
+
