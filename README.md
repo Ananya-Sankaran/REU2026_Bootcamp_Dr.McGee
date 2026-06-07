@@ -16,3 +16,9 @@ Reproducibility2026.pptx - slides for importance of reproducibility. References 
 - A Beginner's Guide to Conducting Reproducible Research (https://doi.org/10.1002/bes2.1801)
 - Setting up your data science project (https://vdsbook.com/03-code_reproducibility)
 
+## Topic Modeling using Latent Dirichlet Allocation and Structural Topic Modeling
+- AbstractsExample.csv: simple set of text for manual topic modeling
+- nsf_abstracts.csv: abstracts from NSF proposals scraped using the code in NSF_Abstracts_Collection.R
+- NSF_Mini_Project.R: R code for creating potential covariates for use with the NSF data.
+
+Content slides coming soon
