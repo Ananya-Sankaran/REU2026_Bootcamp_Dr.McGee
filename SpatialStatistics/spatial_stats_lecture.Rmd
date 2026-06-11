@@ -317,6 +317,9 @@ data("meuse.grid", package = "sp")
 meuse_sf <- st_as_sf(meuse, coords = c("x", "y"), crs = 28992)
 
 # Log-transform zinc (skewed)
+
+# log transformation to make it linear in the sense that we can sum the coefficients 
+# without it it's multiplicative
 meuse_sf$log_zinc <- log(meuse_sf$zinc)
 
 ggplot(meuse_sf) +
@@ -455,7 +458,7 @@ ggplot(krig_sf) +
   theme_minimal()
 ```
 
-> **Key insight:** Kriging is a **BLUP** (Best Linear Unbiased Predictor). It provides not just predictions but also *uncertainty estimates*. Notice that variance is lowest near sample points and highest in data-sparse regions.
+> **Key insight:** Kriging is a **BLUP** (Best Linear Unbiased Predictor). It provides not just predictions but also *uncertainty estimates*. Notice that variance is lowest near sample points and highest in data-sparse regions. Linear in the sense of linear combinations. We did the log transformation in order to made it linear
 
 > **Always map the raw data:** Before fitting any variogram, if you see a directional gradient like for the Meuse Zinc concentration data, ordinary kriging is the wrong choice. The map tells you the model.
 
