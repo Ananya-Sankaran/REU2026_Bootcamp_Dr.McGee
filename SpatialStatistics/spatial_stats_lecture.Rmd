@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
 # Before You Arrive: Install These Packages
 
 ```{r install, eval=FALSE}
-#install.packages(c("sf", "spdep", "ggplot2", "dplyr", "tidyr",
+install.packages(c("sf", "spdep", "ggplot2", "dplyr", "tidyr",
                    "viridis", "tmap", "spData", "gstat", "sp"))
 ```
 
@@ -184,7 +184,8 @@ print(moran_test)
 The analytical p-value assumes normality. A safer approach: permute the spatial arrangement 999 times.
 
 ```{r moran-mc}
-set.seed(42)
+moran_test <- moran.test(nc$sids_rate74, nc_lw)
+     set.seed(42)
 moran_mc <- moran.mc(nc$sids_rate74, nc_lw, nsim = 999)
 plot(moran_mc, main = "Permutation Distribution of Moran's I")
 abline(v = moran_test$estimate[1], col = "red", lwd = 2)
