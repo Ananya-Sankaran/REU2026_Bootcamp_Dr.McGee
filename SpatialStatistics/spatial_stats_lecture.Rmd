@@ -280,6 +280,8 @@ ggplot(quakes, aes(x = long, y = lat)) +
 The simplest test: divide the study region into cells, count events per cell, test against Poisson.
 
 ```{r quadrat-idea}
+# chi-squared test for DISTRIBUTION
+
 # Conceptual: chi-squared test comparing observed cell counts to expected under CSR
 # In full point process analysis, we'd use the spatstat package (see exercise below)
 cat("For a rigorous point process analysis, explore the {spatstat} package.\n")
@@ -333,8 +335,10 @@ ggplot(meuse_sf) +
 meuse_sp <- as(meuse_sf, "Spatial")
 
 # Empirical variogram
+
+# log_zinc ~ 1 means  estimated variogram for log_zinc without covariates
 v_emp <- variogram(log_zinc ~ 1, data = meuse_sp)
-plot(v_emp, main = "Empirical Variogram: log(Zinc)",pch=20)
+plot(v_emp, main = "Empirical Variogram: log(Zinc)", pch=20)
 ```
 
 > **Discussion:** Does the variogram level off? At roughly what distance (in meters)? What does the nugget look like?
@@ -391,7 +395,7 @@ Now we interpolate to a full grid — this is **ordinary kriging**.
 
 ```{r kriging}
 # Prepare prediction grid
-coordinates(meuse.grid) <- ~x + y
+# coordinates(meuse.grid) <- ~x + y
 proj4string(meuse.grid) <- CRS("+init=epsg:28992")
 gridded(meuse.grid) <- TRUE
 
@@ -482,6 +486,12 @@ ggplot(krig_sf) +
 2. We used queen contiguity for the weights matrix. How might results change with k-nearest-neighbor weights? Distance-band weights?
 
 3. Kriging assumes stationarity — the variogram is the same everywhere. When might this fail?
+
+```{r nonstationary}
+# non-stationary data - size of variance/size of mean is related to time
+data(AirPassengers)
+plot(AirPassengers, type = "l")
+```
 
 ---
 
