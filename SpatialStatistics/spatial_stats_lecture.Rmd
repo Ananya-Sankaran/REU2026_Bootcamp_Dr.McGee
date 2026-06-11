@@ -1,0 +1,526 @@
+---
+title: "Introduction to Spatial Statistics"
+subtitle: "NSF REU Bootcamp"
+author: "Monnie McGee"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 9, fig.height = 6)
+```
+
+# Before You Arrive: Install These Packages
+
+```{r install, eval=FALSE}
+#install.packages(c("sf", "spdep", "ggplot2", "dplyr", "tidyr",
+                   "viridis", "tmap", "spData", "gstat", "sp"))
+```
+
+```{r load-libraries}
+library(sf)        # modern spatial data handling
+library(spdep)     # spatial dependence: weights, Moran's I, etc.
+library(ggplot2)
+library(dplyr)
+library(viridis)   # colorblind-friendly palettes
+library(tmap)      # thematic maps
+library(spData)    # built-in spatial datasets
+library(gstat)     # geostatistics / kriging
+library(sp)
+```
+
+---
+
+# PART 1: What Makes Spatial Data Special?
+
+## 1.1  Tobler's First Law of Geography
+
+> *"Everything is related to everything else, but near things are more related than distant things."*
+> — Waldo Tobler, 1970
+
+This is the single most important idea in spatial statistics. Before writing any code, discuss:
+
+- **Discussion prompt:** Think of two variables measured across a US state, say, median income and education level across counties. Would you expect nearby counties to look similar or different? Why?
+- What assumption does this violate in classical statistics?
+
+The violation is **independence**. Standard regression assumes observations are i.i.d. Spatial data are almost never independent they are *autocorrelated*.
+
+## 1.2  Types of Spatial Data
+
+There are three main flavors. Each requires different methods:
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **Areal / Lattice** | Observations tied to polygons | Counties, census tracts |
+| **Point Process** | Locations of events | Disease cases, crime, earthquakes |
+| **Geostatistical** | Continuous surface sampled at points | Air quality monitors, soil pH |
+
+Today we'll touch all three using real data.
+
+---
+
+# PART 2: Areal Data & Spatial Autocorrelation
+
+## 2.1  Our Dataset: US County-Level SIDS Data
+
+We'll use the classic **North Carolina SIDS (Sudden Infant Death Syndrome)** dataset — 100 NC counties, 1974–1979. It's bundled with `spData` and is a workhorse of spatial statistics pedagogy.
+
+```{r load-nc}
+# Load NC shapefile with SIDS data (built into spData)
+data("nc.sids", package = "spData")
+nc <- st_read(system.file("shape/nc.shp", package = "sf"))
+st_crs(nc) <- "+proj=longlat +datum=NAD27"
+
+# Peek at the data
+glimpse(nc)
+```
+
+**Key variables:**
+- `SID74`: SIDS deaths 1974–78
+- `BIR74`: live births 1974–78
+- `NWBIR74`: non-white births 1974–78
+
+Let's compute a SIDS rate per 1,000 births:
+
+```{r compute-rate}
+nc <- nc |>
+  mutate(
+    sids_rate74 = (SID74 / BIR74) * 1000,
+    sids_rate79 = (SID79 / BIR79) * 1000,
+    pct_nw74    = (NWBIR74 / BIR74) * 100
+  )
+
+summary(nc$sids_rate74)
+```
+
+## 2.2  Make a Choropleth Map
+
+```{r choropleth}
+ggplot(nc) +
+  geom_sf(aes(fill = sids_rate74), color = "white", size = 0.2) +
+  scale_fill_viridis_c(option = "magma", name = "SIDS rate\n(per 1,000 births)") +
+  labs(title = "NC SIDS Rate, 1974–78",
+       caption = "Data: Cressie & Read (1985); spData package") +
+  theme_void() +
+  theme(legend.position = "right")
+```
+
+> **Discussion:** Do you see any spatial pattern? Are high-rate counties clustered, or scattered randomly?
+
+## 2.3  Building a Spatial Weights Matrix
+
+To measure spatial relationships formally, we need to define *who is a neighbor of whom*.
+
+**Queen contiguity**: counties sharing any boundary point are neighbors (like a queen in chess).
+
+```{r weights-matrix}
+# Create queen-contiguity neighbors
+nc_nb <- poly2nb(nc, queen = TRUE)
+summary(nc_nb)
+
+# Convert to spatial weights (row-standardized: each row sums to 1)
+nc_lw <- nb2listw(nc_nb, style = "W")
+
+# Visualize the neighbor network
+coords <- st_coordinates(st_centroid(st_geometry(nc)))
+plot(st_geometry(nc), border = "gray70", main = "Queen Contiguity Neighbor Network")
+plot(nc_nb, coords, add = TRUE, col = "steelblue", lwd = 0.8)
+```
+
+> **Key concept:** The weights matrix **W** encodes which observations are "near" each other. Entry W_ij > 0 means county j is a neighbor of county i. Row-standardization means the spatial lag of x at location i is the *average* of x among i's neighbors.
+
+## Overall structure for the data
+
+- 490 nonzero links: there are 490 neighbor pairs in total (each pair counted twice, once for each direction, so 245 unique shared borders)
+- 4.9% nonzero weights: the weights matrix is very sparse — most county pairs are not neighbors, which is expected
+- Average 4.9 links: on average, each county touches about 5 others
+- The distribution table shows that 8 counties have only 2 neighbors, 23 counties have 5 neighbors (the most common), and only 2 counties have 9 neighbors. This makes geographic sense. Small or oddly shaped counties on the coast or state border tend to have fewer neighbors, while large central counties touch more.
+- The average of 5 neighbors is typical for US county data, and the distribution looks reasonable. If we had any counties with 0 or 1 links that would be worth investigating, but 2 is fine.
+
+## 2.4  The Spatial Lag
+
+The **spatial lag** of a variable is its weighted average among neighbors. If a variable is spatially autocorrelated, its value and its spatial lag should be correlated.
+
+```{r spatial-lag}
+nc <- nc |>
+  mutate(
+    sids_lag = lag.listw(nc_lw, sids_rate74)
+  )
+
+ggplot(nc, aes(x = sids_rate74, y = sids_lag)) +
+  geom_point(alpha = 0.7, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "tomato") +
+  labs(x = "SIDS rate (county)", y = "Spatial lag (avg. of neighbors)",
+       title = "Moran Scatterplot: SIDS Rate 1974–78") +
+  theme_minimal()
+```
+
+This is the **Moran scatterplot**. The slope of the line is Moran's I!
+
+## 2.5  Moran's I: Formal Test for Spatial Autocorrelation
+
+$$I = \frac{n}{\sum_{i}\sum_{j} w_{ij}} \cdot \frac{\sum_{i}\sum_{j} w_{ij}(x_i - \bar{x})(x_j - \bar{x})}{\sum_i (x_i - \bar{x})^2}$$
+
+- $I \approx 0$: no spatial autocorrelation (random)
+- $I > 0$: positive autocorrelation (clusters of similar values)
+- $I < 0$: negative autocorrelation (checkerboard pattern)
+
+```{r morans-i}
+moran_test <- moran.test(nc$sids_rate74, nc_lw)
+print(moran_test)
+```
+
+> **Interpret together:** Is I significantly positive? What does that mean substantively for SIDS rates across NC?
+
+### Permutation-based inference
+
+The analytical p-value assumes normality. A safer approach: permute the spatial arrangement 999 times.
+
+```{r moran-mc}
+set.seed(42)
+moran_mc <- moran.mc(nc$sids_rate74, nc_lw, nsim = 999)
+plot(moran_mc, main = "Permutation Distribution of Moran's I")
+abline(v = moran_test$estimate[1], col = "red", lwd = 2)
+```
+
+## 2.6  Local Moran's I (LISA)
+
+Global Moran's I gives one number for the whole map. **Local** indicators (LISA) tell us *where* clusters and outliers are.
+
+Four quadrant types in the Moran scatterplot:
+- **High-High (HH)**: hot spots — high surrounded by high
+- **Low-Low (LL)**: cold spots — low surrounded by low
+- **High-Low (HL)**: outlier — high surrounded by low
+- **Low-High (LH)**: outlier — low surrounded by high
+
+```{r lisa}
+lisa <- localmoran(nc$sids_rate74, nc_lw)
+nc$local_I   <- lisa[, "Ii"]
+nc$local_p   <- lisa[, "Pr(z != E(Ii))"]
+
+# Classify into LISA categories
+nc_mean <- mean(nc$sids_rate74)
+nc <- nc |>
+  mutate(
+    lisa_cat = case_when(
+      local_p < 0.05 & sids_rate74 > nc_mean & sids_lag > nc_mean  ~ "High-High",
+      local_p < 0.05 & sids_rate74 < nc_mean & sids_lag < nc_mean  ~ "Low-Low",
+      local_p < 0.05 & sids_rate74 > nc_mean & sids_lag < nc_mean  ~ "High-Low",
+      local_p < 0.05 & sids_rate74 < nc_mean & sids_lag > nc_mean  ~ "Low-High",
+      TRUE ~ "Not significant"
+    )
+  )
+
+ggplot(nc) +
+  geom_sf(aes(fill = lisa_cat), color = "white", size = 0.2) +
+  scale_fill_manual(
+    values = c("High-High" = "#d73027", "Low-Low" = "#4575b4",
+               "High-Low" = "#fc8d59", "Low-High" = "#91bfdb",
+               "Not significant" = "gray85"),
+    name = "LISA cluster"
+  ) +
+  labs(title = "Local Moran's I — SIDS Rate Clusters",
+       subtitle = "p < 0.05; NC counties 1974–78") +
+  theme_void()
+```
+
+> **Discussion:** Where are the hot spots? Do they correspond to any geographic features or demographic patterns you might expect?
+
+---
+
+# PART 3: Point Patterns
+
+## 3.1  Are Events Clustered, Random, or Dispersed?
+
+Point process analysis asks: given a set of event locations, is their spatial distribution consistent with **complete spatial randomness (CSR)**, or is there evidence of clustering/repulsion?
+
+We'll use **earthquake epicenters** from the `quakes` dataset in base R — 1000 earthquakes near Fiji.
+
+```{r quakes-plot}
+data(quakes)
+head(quakes)
+
+ggplot(quakes, aes(x = long, y = lat)) +
+  geom_point(aes(color = depth, size = mag), alpha = 0.4) +
+  scale_color_viridis_c(option = "plasma", name = "Depth (km)") +
+  scale_size_continuous(range = c(0.5, 4), name = "Magnitude") +
+  labs(title = "Earthquakes Near Fiji (M ≥ 4)",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+## 3.2  Kernel Density Estimation
+
+Rather than plotting raw points, we can estimate the *intensity* of events across space.
+
+```{r kde}
+# Quick KDE with ggplot2's stat_density_2d
+ggplot(quakes, aes(x = long, y = lat)) +
+  stat_density_2d(aes(fill = after_stat(density)),
+                  geom = "raster", contour = FALSE) +
+  geom_point(size = 0.3, alpha = 0.3, color = "white") +
+  scale_fill_viridis_c(option = "inferno", name = "Density") +
+  labs(title = "Kernel Density of Earthquake Epicenters",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+
+> **Discussion:** What patterns do you see? Why might earthquakes cluster near Fiji?
+
+## 3.3  Quadrat Test for CSR (Brief)
+
+The simplest test: divide the study region into cells, count events per cell, test against Poisson.
+
+```{r quadrat-idea}
+# Conceptual: chi-squared test comparing observed cell counts to expected under CSR
+# In full point process analysis, we'd use the spatstat package (see exercise below)
+cat("For a rigorous point process analysis, explore the {spatstat} package.\n")
+cat("Key functions: ppp(), Kest(), envelope(), quadrat.test()\n")
+```
+
+**Exercise (take-home):** Install `spatstat`, convert the quakes data to a `ppp` object, and compute Ripley's K function. Does it suggest clustering at short distances?
+
+---
+
+# PART 4: Geostatistics & Kriging
+
+## 4.1  The Variogram: How Does Similarity Decay with Distance?
+
+For geostatistical data (continuous surface, sampled at points), we model how the **variance** between pairs of measurements grows with distance.
+
+$$\gamma(h) = \frac{1}{2|N(h)|} \sum_{N(h)} [Z(s_i) - Z(s_j)]^2$$
+
+where $N(h)$ is the set of pairs separated by distance $h$.
+
+Three key variogram parameters:
+- **Nugget**: variance at distance 0 (measurement error + microscale variation)
+- **Sill**: total variance (where the variogram levels off)
+- **Range**: distance at which spatial correlation effectively vanishes
+
+We'll use the `meuse` river dataset: heavy metal concentrations in floodplain soils.
+
+```{r meuse-load}
+data("meuse", package = "sp")
+data("meuse.grid", package = "sp")
+
+# Convert to sf
+meuse_sf <- st_as_sf(meuse, coords = c("x", "y"), crs = 28992)
+
+# Log-transform zinc (skewed)
+meuse_sf$log_zinc <- log(meuse_sf$zinc)
+
+ggplot(meuse_sf) +
+  geom_sf(aes(color = log_zinc, size = log_zinc), alpha = 0.8) +
+  scale_color_viridis_c(option = "turbo", name = "log(Zinc)") +
+  labs(title = "Zinc Concentration in Meuse Floodplain",
+       subtitle = "Sampled soil locations; log scale") +
+  theme_minimal() +
+  guides(size = "none")
+```
+
+## 4.2  Compute the Empirical Variogram
+
+```{r variogram}
+# Need sp-class for gstat
+meuse_sp <- as(meuse_sf, "Spatial")
+
+# Empirical variogram
+v_emp <- variogram(log_zinc ~ 1, data = meuse_sp)
+plot(v_emp, main = "Empirical Variogram: log(Zinc)",pch=20)
+```
+
+> **Discussion:** Does the variogram level off? At roughly what distance (in meters)? What does the nugget look like?
+
+## 4.3  Fit a Variogram Model
+
+```{r vario-fit}
+# Fit a spherical model
+v_fit <- fit.variogram(v_emp, model = vgm(psill = 0.6, model = "Sph",
+                                           range = 900, nugget = 0.05))
+print(v_fit)
+plot(v_emp, v_fit, main = "Fitted Spherical Variogram: log(Zinc)")
+# Total variance
+cat("The total variance is", round(var(meuse_sf$log_zinc),3))
+```
+### Explaining the output
+
+#### Row 1 — Nugget (Nug)
+
+psill = 0.05: the variance at zero distance, which is tiny relative to the total. This represents measurement error and microscale variation in zinc that occurs over distances shorter than the closest sample spacing. A small nugget like this is good news: it means most of the variance in log(zinc) is spatially structured, not noise.
+
+#### Row 2 — Spherical component (Sph)
+
+psill = 0.59: the spatially structured variance
+range = 897 meters: spatial correlation in log(zinc) effectively disappears beyond about 900 meters. Two soil samples more than 900m apart are essentially uncorrelated
+
+The total sill is nugget + psill = 0.05 + 0.59 = 0.64
+
+#### The big picture
+The ratio of structured variance to total variance is 0.59 / 0.64 ≈ 92%. This means nearly all the variability in log(zinc) across the floodplain is spatially structured. Zinc concentrations change smoothly and predictably with location, rather than jumping around randomly. That's exactly what makes kriging worthwhile here: there is strong spatial signal to exploit when making predictions. Notice also that fit.variogram nudged starting values slightly (we gave it 0.6 and 900, it settled on 0.591 and 897). That's the least-squares fitting doing its job.
+
+A sill somewhat higher than the sample variance is actually common and not necessarily a problem. The empirical variogram is computed from pairwise differences across the whole dataset, while `var()` is computed around the global mean. If the data have a spatial trend (and zinc almost certainly does), those two quantities measure slightly different things. The variogram can exceed the sample variance when a trend is present.
+
+```{r trendCheck}
+ggplot(meuse_sf) +
+  geom_sf(aes(color = log_zinc, size = log_zinc)) +
+  scale_color_viridis_c(option = "turbo") +
+  theme_minimal()
+```
+
+A clear gradient (higher values near the river channel) confirms a trend. In that case the right move is to fit the variogram on the residuals after removing the trend, which in `gstat` looks like:
+
+```{r remove trend}
+# use distance to river as a covariate
+v_emp_dist <- variogram(log_zinc ~ dist, data = meuse_sp)
+v_fit_dist <- fit.variogram(v_emp_dist, model = vgm(psill = 0.6, model = "Sph", range = 900, nugget = 0.05))
+plot(v_emp_dist, v_fit_dist, main = "Fitted Spherical Variogram: log(Zinc)")
+print(v_fit_dist)
+```
+
+## 4.4  Ordinary Kriging Prediction
+
+Now we interpolate to a full grid — this is **ordinary kriging**.
+
+```{r kriging}
+# Prepare prediction grid
+coordinates(meuse.grid) <- ~x + y
+proj4string(meuse.grid) <- CRS("+init=epsg:28992")
+gridded(meuse.grid) <- TRUE
+
+# Krige!
+krig_out <- krige(log_zinc ~ 1, meuse_sp, meuse.grid, model = v_fit)
+
+# Convert to sf for plotting
+krig_sf <- st_as_sf(krig_out)
+
+ggplot(krig_sf) +
+  geom_sf(aes(color = var1.pred), size = 0.8) +
+  scale_color_viridis_c(option = "turbo", name = "Kriged\nlog(Zinc)") +
+  geom_sf(data = meuse_sf, color = "white", size = 1.2, shape = 3) +
+  labs(title = "Ordinary Kriging Prediction: log(Zinc)",
+       subtitle = "Crosses = sample locations") +
+  theme_minimal()
+```
+
+```{r kriging-variance}
+# Kriging also gives prediction variance (uncertainty!)
+ggplot(krig_sf) +
+  geom_sf(aes(color = var1.var), size = 0.8) +
+  scale_color_viridis_c(option = "magma", name = "Kriging\nvariance") +
+  labs(title = "Kriging Prediction Variance",
+       subtitle = "Higher variance = less certain (far from sample points)") +
+  theme_minimal()
+```
+
+### Kriging with distance as covariate
+```{r kriging_dist}
+# Prepare prediction grid
+proj4string(meuse.grid) <- CRS("+init=epsg:28992")
+gridded(meuse.grid) <- TRUE
+
+# Krige with distance-to-river trend (universal kriging)
+krig_out <- krige(log_zinc ~ dist, meuse_sp, meuse.grid, model = v_fit_dist)
+
+# Convert to sf for plotting
+krig_sf <- st_as_sf(krig_out)
+
+ggplot(krig_sf) +
+  geom_sf(aes(color = var1.pred), size = 0.8) +
+  scale_color_viridis_c(option = "turbo", name = "Kriged\nlog(Zinc)") +
+  geom_sf(data = meuse_sf, color = "white", size = 1.2, shape = 3) +
+  labs(title = "Universal Kriging Prediction: log(Zinc)",
+       subtitle = "Trend: distance to river | Crosses = sample locations") +
+  theme_minimal()
+```
+
+```{r kriging-variance_dist}
+# Kriging also gives prediction variance (uncertainty!)
+ggplot(krig_sf) +
+  geom_sf(aes(color = var1.var), size = 0.8) +
+  scale_color_viridis_c(option = "magma", name = "Kriging\nvariance") +
+  labs(title = "Universal Kriging Prediction Variance",
+       subtitle = "Higher variance = less certain (far from sample points)") +
+  theme_minimal()
+```
+
+> **Key insight:** Kriging is a **BLUP** (Best Linear Unbiased Predictor). It provides not just predictions but also *uncertainty estimates*. Notice that variance is lowest near sample points and highest in data-sparse regions.
+
+> **Always map the raw data:** Before fitting any variogram, if you see a directional gradient like for the Meuse Zinc concentration data, ordinary kriging is the wrong choice. The map tells you the model.
+
+---
+
+# PART 5: Bringing It Together — Discussion & Next Steps
+
+## What We Covered
+
+| Concept | Method | R Functions |
+|---------|--------|-------------|
+| Spatial autocorrelation | Moran's I, LISA | `moran.test()`, `localmoran()` |
+| Neighbor structure | Weights matrix | `poly2nb()`, `nb2listw()` |
+| Point patterns | KDE, CSR tests | `stat_density_2d()`, `spatstat` |
+| Spatial interpolation | Kriging | `variogram()`, `krige()` |
+
+## What Comes Next
+
+1. **Spatial regression** — when OLS residuals are spatially autocorrelated, use spatial lag or spatial error models (`spatialreg` package)
+2. **Spatial scan statistics** — cluster detection for public health (`SaTScan`, `rsatscan`)
+3. **Bayesian spatial models** — INLA, `R-INLA` for latent Gaussian models
+4. **Machine learning + space** — random forests with spatial CV, `sperrorest` package
+
+## Discussion Questions
+
+1. We found spatial clustering in SIDS rates. Does that *prove* a spatial process caused it? What alternative explanations exist?
+
+2. We used queen contiguity for the weights matrix. How might results change with k-nearest-neighbor weights? Distance-band weights?
+
+3. Kriging assumes stationarity — the variogram is the same everywhere. When might this fail?
+
+---
+
+# EXERCISES (To complete during or after the session)
+
+## Exercise 1: Repeat the Moran's I analysis for SIDS rates in 1979 (`sids_rate79`). Compare the Moran's I values between 1974–78 and 1979–84. What do you find?
+
+```{r ex1, eval=FALSE}
+# Your code here
+moran.test(___, nc_lw)
+```
+
+## Exercise 2: Change the neighbor definition to k=5 nearest neighbors. Does Moran's I change substantially?
+
+```{r ex2, eval=FALSE}
+nc_knn5 <- knn2nb(knearneigh(coords, k = 5))
+nc_lw_knn <- nb2listw(nc_knn5, style = "W")
+moran.test(nc$sids_rate74, nc_lw_knn)
+```
+
+## Exercise 3: For the meuse data, fit an **exponential** variogram model instead of spherical. Which fits better? Use `attr(fit, "SSErr")` to compare.
+
+```{r ex3, eval=FALSE}
+v_exp <- fit.variogram(v_emp, model = vgm(model = "Exp", ...))
+# compare SSErr
+```
+
+## Exercise 4 (Challenge): Install `spatstat`. Convert the `quakes` dataset to a `ppp` object and compute the **L-function** (normalized Ripley's K). Is there evidence of clustering at short distances?
+
+```{r ex4, eval=FALSE}
+# install.packages("spatstat")
+library(spatstat)
+quakes_ppp <- ppp(x = quakes$long, y = quakes$lat,
+                  window = owin(range(quakes$long), range(quakes$lat)))
+plot(Lest(quakes_ppp, correction = "Ripley"))
+```
+
+---
+
+**Data sources used:**
+- `nc.sids` / `sids.shp` from `spData`: Cressie & Read (1985), bundled in package
+- `quakes`: Base R dataset, USGS
+- `meuse` / `meuse.grid` from `sp`: Classical geostatistics dataset (Rikken & Van Rijn 1993)

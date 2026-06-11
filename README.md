@@ -27,11 +27,15 @@ Reproducibility2026.pptx - slides for importance of reproducibility. References 
 ## Time Series and Forecasting, plus some other handy statistical methods (June 10, 2026, 1:00 - 3:00)
 - time_series_bootcamp_slides.pdf: compiled beamer slides
 - time_series_bootcamp_slides.tex: raw beamer code for slides
-- time_series_smoothing_bootcamp.Rmd: R markdown file containing code for slides
+- time_series_smoothing_bootcamp.Rmd: R markdown file containing code for analysis
 - time_series_smoothing_bootcamp.html: Compiled R markdown
 - remaining files are rendered plots required for the beamer code to compile.
 
 ### Time Series and Forecasting slides and R Markdown were updated to reflect discovery made during class - temperate and $\text{CO}_2$ are really related! Correction and explanation are given in the R Markdown file. 
 
 ## Spatial Statistics (June 11, 10:00 - 12:00)
-** Coming Soon! **
+- spatial_stats_lecture.Rmd: R Markdown file containing code for analysis
+- spatial_stats_lecture.html: Compiled R Markdown file
+- spatial_stats_beamer_v2.tex: Raw Latex code for slides
+- spatial_stats_beamer_v2.pdf: Compiled beamer slides
+- remaining files are plots required for the beamer code to compile.
